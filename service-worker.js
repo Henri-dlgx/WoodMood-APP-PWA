@@ -1,27 +1,32 @@
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil(clients.claim()));
 
+const APP_URL = '/WoodMood-APP-PWA/';
+const ICON    = '/WoodMood-APP-PWA/icon-192.png';
+
 self.addEventListener('push', event => {
   const data = event.data?.json() ?? {};
   event.waitUntil(
     self.registration.showNotification(data.title ?? 'WoodMood', {
       body:     data.body ?? '',
-      icon:     '/icon-192.png',
-      badge:    '/icon-192.png',
+      icon:     ICON,
+      badge:    ICON,
       tag:      data.tag ?? 'woodmood',
       renotify: true,
       vibrate:  [200, 100, 200],
-      data:     { url: self.location.origin }
+      data:     { url: self.location.origin + APP_URL }
     })
   );
 });
 
 self.addEventListener('notificationclick', event => {
   event.notification.close();
+  const target = event.notification.data?.url ?? (self.location.origin + APP_URL);
   event.waitUntil(
-    clients.matchAll({ type: 'window' }).then(list => {
-      if (list.length) return list[0].focus();
-      return clients.openWindow(event.data.url);
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+      const match = list.find(c => c.url.startsWith(self.location.origin + APP_URL));
+      if (match) return match.focus();
+      return clients.openWindow(target);
     })
   );
 });
