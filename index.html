@@ -441,6 +441,7 @@
             <div style="font-size:.82rem;opacity:.75;margin-bottom:4px">Get notified even when the app is closed — fault, empty cartridge, low cartridge.</div>
             <button class="btn btn-brown btn-sm btn-full" id="push-enable-btn" onclick="enablePushNotifications()">🔔 Enable Push Notifications</button>
             <button class="btn btn-sm btn-full" id="push-disable-btn" style="display:none;background:#888;color:#fff" onclick="disablePushNotifications()">Disable Push Notifications</button>
+            <button class="btn btn-sm btn-full" id="push-test-btn" style="display:none;background:#5a9e6f;color:#fff" onclick="testPushNotification()">🧪 Send Test Notification</button>
             <div id="push-notif-status" style="font-size:.8rem;margin-top:2px;opacity:.7;text-align:center"></div>
           </div>
         </div>
@@ -1980,10 +1981,29 @@ async function disablePushNotifications() {
   updatePushStatus('disabled');
 }
 
+async function testPushNotification() {
+  const btn = document.getElementById('push-test-btn');
+  btn.textContent = 'Sending…';
+  btn.disabled = true;
+  try {
+    const serial = document.getElementById('cfg-serial')?.value || 'JJQF9D';
+    const res = await fetch(`${RELAY_URL}/test`, {
+      method: 'POST', headers: RELAY_HEADERS,
+      body: JSON.stringify({ serial })
+    });
+    const data = await res.json();
+    btn.textContent = data.ok ? '✅ Sent! Check your phone' : `⚠️ ${data.reason}`;
+  } catch(e) {
+    btn.textContent = '⚠️ Failed — is relay running?';
+  }
+  setTimeout(() => { btn.textContent = '🧪 Send Test Notification'; btn.disabled = false; }, 4000);
+}
+
 function updatePushStatus(state) {
-  const el  = document.getElementById('push-notif-status');
+  const el   = document.getElementById('push-notif-status');
   const btn  = document.getElementById('push-enable-btn');
   const btnD = document.getElementById('push-disable-btn');
+  const btnT = document.getElementById('push-test-btn');
   if (!el) return;
   const map = {
     enabled:     '✅ Push notifications active',
@@ -1996,6 +2016,7 @@ function updatePushStatus(state) {
   const on = state === 'enabled';
   if (btn)  btn.style.display  = on ? 'none'  : 'block';
   if (btnD) btnD.style.display = on ? 'block' : 'none';
+  if (btnT) btnT.style.display = on ? 'block' : 'none';
 }
 
 function urlBase64ToUint8Array(base64) {
