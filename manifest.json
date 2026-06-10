@@ -1,7 +1,8 @@
 {
   "name": "WoodMood",
   "short_name": "WoodMood",
-  "start_url": "/",
+  "start_url": "/WoodMood-APP-PWA/",
+  "scope": "/WoodMood-APP-PWA/",
   "display": "standalone",
   "background_color": "#3b1f0a",
   "theme_color": "#8B4513",
