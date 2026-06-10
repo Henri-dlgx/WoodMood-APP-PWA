@@ -254,6 +254,7 @@
     <div class="section-title">Broker Connection</div>
     <div style="display:flex;flex-direction:column;gap:8px">
       <input class="conn-input" id="cfg-broker" placeholder="Broker  e.g. abc123.s1.eu.hivemq.cloud"/>
+      <input class="conn-input" id="cfg-port"   placeholder="WSS port  e.g. 8084" type="number"/>
       <input class="conn-input" id="cfg-user"   placeholder="Username"/>
       <input class="conn-input" id="cfg-pass"   placeholder="Password" type="password"/>
       <input class="conn-input" id="cfg-serial" placeholder="Device serial  e.g. JJQF9D"/>
@@ -792,6 +793,7 @@ window.addEventListener('load', () => {
 
 function fillForm() {
   document.getElementById('cfg-broker').value = cfg.broker || '';
+  document.getElementById('cfg-port').value   = cfg.port   || '8084';
   document.getElementById('cfg-user').value   = cfg.user   || '';
   document.getElementById('cfg-pass').value   = cfg.pass   || '';
   document.getElementById('cfg-serial').value = cfg.serial || '';
@@ -808,6 +810,7 @@ function toggleConnPanel() {
 // ============================================================
 function saveAndConnect() {
   cfg.broker = document.getElementById('cfg-broker').value.trim();
+  cfg.port   = parseInt(document.getElementById('cfg-port').value.trim()) || 8084;
   cfg.user   = document.getElementById('cfg-user').value.trim();
   cfg.pass   = document.getElementById('cfg-pass').value.trim();
   cfg.serial = document.getElementById('cfg-serial').value.trim();
@@ -823,7 +826,7 @@ function connect() {
 
   if (client) { try { client.end(true); } catch(e){} }
 
-  client = mqtt.connect(`wss://${cfg.broker}:8884/mqtt`, {
+  client = mqtt.connect(`wss://${cfg.broker}:${cfg.port || 8084}/mqtt`, {
     username:        cfg.user,
     password:        cfg.pass,
     clientId:        'woodmood-web-' + Math.random().toString(16).substr(2,8),
