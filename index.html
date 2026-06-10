@@ -1,0 +1,2019 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>WoodMood</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#8B4513">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <style>
+    /* ── Base ── */
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      background:linear-gradient(135deg,#5C2E00 0%,#8B4513 50%,#D2691E 100%);
+      min-height:100vh;padding:12px;
+    }
+    .wrap{max-width:480px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
+
+    /* ── Cards ── */
+    .card{background:#fff;border-radius:18px;padding:18px;box-shadow:0 4px 20px rgba(0,0,0,.35)}
+    .card-warm{background:#CD853F;color:#fff;border-radius:18px;padding:18px;box-shadow:0 4px 20px rgba(0,0,0,.35)}
+
+    /* ── Header ── */
+    .logo{font-size:1.6rem;font-weight:700;color:#fff;text-shadow:0 2px 6px rgba(0,0,0,.5)}
+    .status-badge{display:flex;align-items:center;gap:7px;font-size:.82rem;color:#fff;
+      background:rgba(0,0,0,.3);border-radius:20px;padding:6px 14px;cursor:pointer}
+    .status-dot{width:11px;height:11px;border-radius:50%;background:#e74c3c;
+      transition:background .4s;flex-shrink:0}
+    .status-dot.connecting{background:#f39c12;animation:blink .8s infinite alternate}
+    .status-dot.connected {background:#f39c12}        /* orange = MQTT ok, no heartbeat */
+    .status-dot.alive     {background:#2ecc71;animation:hbpulse 1.2s infinite} /* green = heartbeat */
+    @keyframes blink   {to{opacity:.3}}
+    @keyframes hbpulse {50%{opacity:.4}}
+
+    /* ── Connection panel ── */
+    .conn-input{padding:9px 12px;border:1px solid #d0b08a;border-radius:8px;font-size:.9rem;width:100%}
+    .conn-input:focus{outline:none;border-color:#8B4513}
+
+    /* ── System state button ── */
+    .sys-btn{width:100%;border:none;border-radius:12px;font-size:1rem;font-weight:700;
+      padding:14px;letter-spacing:.03em;transition:filter .15s}
+    .sys-btn.startup  {background:#d4a04a;color:#fff;cursor:pointer}
+    .sys-btn.startup:hover{filter:brightness(1.08)}
+    .sys-btn.auto     {background:#27ae60;color:#fff;cursor:pointer}
+    .sys-btn.auto:hover{filter:brightness(1.08)}
+    .sys-btn.cooldown {background:#2980b9;color:#fff;cursor:pointer}
+    .sys-btn.cooldown:hover{filter:brightness(1.1)}
+    .sys-btn.standby  {background:#7f8c8d;color:#fff;cursor:pointer}
+    .sys-btn.standby:hover{filter:brightness(1.1)}
+    .sys-btn.fault    {background:#c0392b;color:#fff;cursor:default;
+      animation:faultpulse 2s infinite alternate}
+    @keyframes faultpulse{to{background:#922b21}}
+
+    /* ── Fault banner ── */
+    #fault-banner{display:none;background:#c0392b;color:#fff;border-radius:18px;
+      padding:18px;box-shadow:0 4px 20px rgba(0,0,0,.4)}
+    #fault-banner.show{display:block}
+    .fault-title{font-size:1.05rem;font-weight:700;margin-bottom:6px}
+    .fault-side-badge{display:inline-block;background:rgba(255,255,255,.2);border-radius:8px;padding:3px 10px;font-size:.8rem;font-weight:600;margin-bottom:8px;letter-spacing:.04em}
+    .fault-msg{font-size:.84rem;opacity:.85;margin-bottom:10px}
+    .btn-countdown{background:rgba(255,255,255,.2);color:#fff;border:2px solid rgba(255,255,255,.4);cursor:default;font-size:.95rem}
+    .fault-resolve-group{display:flex;flex-direction:column;gap:6px;margin-top:4px}
+    .btn-resolve{background:#27ae60;font-size:1rem;font-weight:700}
+    .btn-reopen{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.4);font-size:.82rem}
+
+    /* ── Buttons ── */
+    .btn{border:none;border-radius:10px;font-size:.9rem;font-weight:600;
+      cursor:pointer;padding:10px 14px;transition:filter .15s;flex:1}
+    .btn:hover{filter:brightness(1.1)}
+    .btn:active{filter:brightness(.9)}
+    .btn-brown {background:#8B4513;color:#fff}
+    .btn-green {background:#28a745;color:#fff}
+    .btn-red   {background:#dc3545;color:#fff}
+    .btn-orange{background:#e67e22;color:#fff}
+    .btn-blue  {background:#2980b9;color:#fff}
+    .btn-gray  {background:#7f8c8d;color:#fff}
+    .btn-sm    {padding:7px 10px;font-size:.82rem}
+    .btn-full  {width:100%}
+    .row-btns  {display:flex;gap:8px}
+
+    /* ── Temperature card ── */
+    .adj-btn{width:44px;height:44px;font-size:1.3rem;padding:0;border-radius:10px;
+      border:none;background:#8B4513;color:#fff;cursor:pointer;flex-shrink:0;
+      font-weight:700;transition:filter .15s}
+    .adj-btn:hover{filter:brightness(1.1)}
+    /* Main pair — current room temp + wanted temp */
+    .main-temps-row{display:flex;margin-bottom:10px}
+    .main-temp-half{flex:1;display:flex;flex-direction:column;align-items:center;
+      justify-content:center;padding:8px 6px}
+    .main-temp-half+.main-temp-half{border-left:1px solid rgba(255,255,255,.25)}
+    .wanted-controls{display:flex;align-items:center;gap:10px}
+    #room-val{font-size:2.6rem;font-weight:700;line-height:1;min-width:70px;text-align:center}
+    .temp-big{font-size:2.6rem;font-weight:700;line-height:1}
+    .temp-small-label{font-size:.65rem;opacity:.65;margin-top:6px;line-height:1.35;
+      text-transform:uppercase;letter-spacing:.04em}
+    /* Stove internals — de-emphasised technical row */
+    .stove-tech-row{display:flex;align-items:center;justify-content:center;gap:6px;
+      border-top:1px solid rgba(255,255,255,.18);padding-top:9px;
+      font-size:.75rem;opacity:.5;letter-spacing:.02em}
+
+    /* ── Log cartridges ── */
+    .cart-grid{display:grid;grid-template-columns:1fr 56px 1fr;gap:0;align-items:start}
+    .cart-col{display:flex;flex-direction:column;align-items:center;gap:5px}
+    .cart-col.left {border-right:1px solid #f0e0d0;padding-right:10px}
+    .cart-col.right{border-left: 1px solid #f0e0d0;padding-left: 10px}
+    .cart-title{font-size:.75rem;font-weight:700;color:#666;text-transform:uppercase;
+      letter-spacing:.06em;margin-bottom:2px}
+    .bars{display:flex;flex-direction:column-reverse;gap:5px;align-items:center;
+      min-height:186px;justify-content:flex-start;padding-top:2px;width:100%}
+    .bar{width:100%;height:26px;border-radius:6px;background:#8B7355;transition:opacity .4s}
+    .bar.empty{background:transparent;border:2px dashed #d9c8b8}
+    .cart-count{font-size:.9rem;font-weight:700;color:#8B4513}
+    .cart-btn-stack{display:flex;flex-direction:column;gap:5px;width:100%;margin-top:4px}
+    .cart-btn-stack .btn{font-size:.76rem;padding:8px 4px;width:100%;flex:none}
+    .time-col{display:flex;flex-direction:column;align-items:center;justify-content:center;
+      padding:12px 0;color:#8B4513}
+    .time-label{font-size:.6rem;font-weight:700;text-transform:uppercase;
+      letter-spacing:.06em;color:#aaa;margin-bottom:5px;text-align:center}
+    .time-val{font-size:1.15rem;font-weight:700;color:#8B4513;text-align:center}
+    .time-unit{font-size:.64rem;color:#bbb;text-align:center}
+
+    /* ── Settings ── */
+    .settings-toggle{display:flex;align-items:center;justify-content:space-between;
+      cursor:pointer;user-select:none}
+    .settings-toggle .arrow{transition:transform .25s;font-size:.9rem;color:#8B4513}
+    .settings-toggle .arrow.open{transform:rotate(180deg)}
+    .settings-body{display:none;margin-top:14px;border-top:1px solid #f0e0d0;
+      padding-top:16px;flex-direction:column;gap:18px}
+    .settings-body.open{display:flex}
+    .settings-section{font-size:.72rem;color:#bbb;font-weight:700;text-transform:uppercase;
+      letter-spacing:.08em;margin-bottom:8px}
+    /* Alert rows */
+    .alert-row{display:grid;grid-template-columns:1fr auto;gap:6px;align-items:center;
+      padding:10px;background:#f9f5f1;border-radius:10px}
+    .alert-fields{display:flex;flex-direction:column;gap:5px}
+    .alert-fields input,.alert-fields select{padding:7px 10px;border:1px solid #d0b08a;border-radius:7px;
+      font-size:.84rem;width:100%}
+    .alert-fields input:focus{outline:none;border-color:#8B4513}
+    input[type=checkbox]{width:19px;height:19px;accent-color:#8B4513;cursor:pointer;
+      margin-left:4px}
+    /* Maintenance rows */
+    .maint-row{display:flex;align-items:center;gap:8px;padding:9px 12px;
+      background:#f9f5f1;border-radius:10px;font-size:.88rem;color:#555}
+    .maint-lbl{flex:1}
+    .maint-val{font-weight:700;color:#8B4513;white-space:nowrap}
+    /* House params */
+    .param-row{display:flex;align-items:center;gap:8px}
+    .param-row label{font-size:.82rem;color:#555;white-space:nowrap}
+    .param-row input[type=number]{flex:1;padding:7px 10px;border:1px solid #d0b08a;
+      border-radius:7px;font-size:.9rem}
+    .param-row input:focus{outline:none;border-color:#8B4513}
+    .ins-wrap{display:flex;gap:6px;margin-top:2px}
+    .ins-btn{border:2px solid #d0b08a;background:#fff;border-radius:8px;padding:7px 14px;
+      font-size:.82rem;cursor:pointer;color:#666;transition:all .15s;font-weight:500}
+    .ins-btn.active{border-color:#8B4513;background:#8B4513;color:#fff;font-weight:700}
+
+    /* ── Offline overlay ── */
+    #offline-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);
+      z-index:100;align-items:center;justify-content:center}
+    #offline-overlay.show{display:flex}
+    .offline-box{background:#fff;border-radius:18px;padding:24px;max-width:300px;text-align:center}
+    .offline-box h2{color:#c0392b;margin-bottom:8px}
+    .offline-box p{font-size:.88rem;color:#555;margin-bottom:16px}
+
+    /* ── Misc ── */
+    .section-title{font-size:.75rem;font-weight:700;color:#8B4513;text-transform:uppercase;
+      letter-spacing:.07em;margin-bottom:12px}
+    .divider{border:none;border-top:1px solid #f0e0d0;margin:0}
+
+    /* ── Technical Mode ── */
+    .tech-sec{font-size:.68rem;font-weight:800;color:#8B4513;text-transform:uppercase;
+      letter-spacing:.12em;border-bottom:2px solid #f0e0d0;padding-bottom:6px;margin-bottom:12px}
+    .tech-field-lbl{font-size:.78rem;color:#888;margin-bottom:5px}
+    .tech-input{width:100%;padding:9px 12px;border:1px solid #d0b08a;border-radius:8px;
+      font-size:.95rem;box-sizing:border-box}
+    .tech-input:focus{outline:none;border-color:#8B4513}
+    .tech-manual-block{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+    /* Toggle switch */
+    .toggle-wrap{display:flex;align-items:center;justify-content:space-between}
+    .toggle-label{font-size:.88rem;color:#444}
+    .tgl{position:relative;display:inline-block;width:48px;height:27px;flex-shrink:0}
+    .tgl input{opacity:0;width:0;height:0}
+    .tgl-sl{position:absolute;cursor:pointer;inset:0;background:#ccc;border-radius:27px;transition:.25s}
+    .tgl-sl:before{content:"";position:absolute;height:21px;width:21px;left:3px;bottom:3px;
+      background:#fff;border-radius:50%;transition:.25s;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+    input:checked + .tgl-sl{background:#27ae60}
+    input:checked + .tgl-sl:before{transform:translateX(21px)}
+    /* Side selector */
+    .side-sel{display:flex;background:#f5e8da;border-radius:10px;padding:3px;gap:3px;margin-bottom:4px}
+    .side-opt{flex:1;text-align:center;padding:9px 6px;border-radius:8px;font-weight:700;
+      font-size:.9rem;cursor:pointer;transition:background .2s,color .2s;color:#8B4513;user-select:none}
+    .side-opt.active{background:#8B4513;color:#fff}
+    /* Small badge shown next to section headers that use active side */
+    .side-badge{display:inline-block;background:#8B4513;color:#fff;border-radius:4px;
+      font-size:.6rem;padding:1px 7px;margin-left:7px;vertical-align:middle;letter-spacing:.03em}
+    .gap-col{display:flex;flex-direction:column;gap:8px}
+
+    /* ── Temperature Schedule ── */
+    .sched-pt{cursor:ns-resize}
+    .sched-badge{font-size:.62rem;font-weight:700;color:#8B4513;background:rgba(139,69,19,.1);
+      border-radius:20px;padding:1px 7px;margin-top:3px;display:none;letter-spacing:.02em}
+    .sched-badge.active{display:inline-block}
+
+    /* ── Silence mode ── */
+    .silence-ctrl{display:flex;align-items:center;gap:8px}
+    .silence-icon{font-size:1.3rem;line-height:1;opacity:.4;transition:opacity .2s,filter .2s;filter:grayscale(1)}
+    .silence-icon.active{opacity:1;filter:none}
+    .silence-ctrl .tgl-sl{background:rgba(255,255,255,.25)}
+    #silence-toggle:checked + .tgl-sl{background:#c0392b}
+
+    /* ── Toast ── */
+    #toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);
+      background:#2b1a0e;color:#f0d9c0;padding:10px 20px;border-radius:20px;
+      font-size:.84rem;font-weight:600;opacity:0;pointer-events:none;
+      transition:opacity .3s;z-index:200;white-space:nowrap}
+    #toast.show{opacity:1}
+
+    /* ── Simulate button ── */
+    .btn-sim{background:#4a3728;color:#f0d9c0;border:2px dashed #8B7355}
+
+    /* ── Heap monitor ── */
+    .heap-row{display:flex;align-items:center;gap:10px;padding:7px 12px;
+      background:rgba(0,0,0,.28);border-radius:10px;font-size:.72rem;
+      color:rgba(255,255,255,.75)}
+    .heap-lbl{opacity:.7;white-space:nowrap}
+    .heap-bar-wrap{flex:1;background:rgba(255,255,255,.18);border-radius:4px;height:5px;overflow:hidden}
+    .heap-bar-fill{height:100%;border-radius:4px;transition:width .6s,background .6s;background:#2ecc71;width:0%}
+    .heap-val{font-weight:700;white-space:nowrap;min-width:48px;text-align:right}
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ── Header ── -->
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 2px">
+    <div class="logo">WoodMood</div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <div class="silence-ctrl" title="Silence mode — pauses log insertions">
+        <span class="silence-icon" id="silence-icon">🤫</span>
+        <label class="tgl"><input type="checkbox" id="silence-toggle" onchange="setSilenceMode(this.checked)"><span class="tgl-sl"></span></label>
+      </div>
+      <div class="status-badge" onclick="toggleConnPanel()">
+        <div class="status-dot" id="status-dot"></div>
+        <span id="status-label">Disconnected</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Connection panel ── -->
+  <div class="card" id="conn-card">
+    <div class="section-title">Broker Connection</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <input class="conn-input" id="cfg-broker" placeholder="Broker  e.g. abc123.s1.eu.hivemq.cloud"/>
+      <input class="conn-input" id="cfg-user"   placeholder="Username"/>
+      <input class="conn-input" id="cfg-pass"   placeholder="Password" type="password"/>
+      <input class="conn-input" id="cfg-serial" placeholder="Device serial  e.g. JJQF9D"/>
+      <button class="btn btn-brown btn-full" onclick="saveAndConnect()">Connect</button>
+    </div>
+  </div>
+
+  <!-- ── System state ── -->
+  <div id="sys-state-card" class="card" style="padding:12px">
+    <button class="sys-btn startup" id="sys-btn" onclick="sysButtonClick()">Startup</button>
+  </div>
+
+  <!-- ── Fault banner ── -->
+  <div id="fault-banner">
+    <div class="fault-title">⚠️ FAULT DETECTED</div>
+    <div class="fault-side-badge" id="fault-side-badge">— Side</div>
+    <div class="fault-msg" id="fault-msg-text">Log stuck in trapdoor — follow the steps below</div>
+    <!-- Phase 1: unlock door -->
+    <div id="fault-phase-1">
+      <button class="btn btn-orange btn-full" onclick="faultUnlockDoor()">
+        🔓 Unlock <span class="fault-side-name">—</span> Door
+      </button>
+    </div>
+    <!-- Phase 2: countdown while door is held open -->
+    <div id="fault-phase-2" style="display:none">
+      <button class="btn btn-countdown btn-full" disabled>
+        Keep door open… <span id="fault-countdown">10</span>s
+      </button>
+    </div>
+    <!-- Phase 3: ready to resolve -->
+    <div id="fault-phase-3" style="display:none" class="fault-resolve-group">
+      <button class="btn btn-resolve btn-full" onclick="resolveFault()">✓ Resolve Fault</button>
+      <button class="btn btn-reopen btn-full" onclick="faultUnlockDoor()">
+        🔓 Unlock <span class="fault-side-name">—</span> Door Again
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Temperature ── -->
+  <div class="card-warm">
+    <!-- Main: current room temp (BLE) + wanted room temp -->
+    <div class="main-temps-row">
+      <div class="main-temp-half">
+        <div class="temp-big" id="ble-room-temp" style="opacity:.5">—°</div>
+        <div class="temp-small-label" id="ble-room-label">Current temperature</div>
+      </div>
+      <div class="main-temp-half">
+        <div class="wanted-controls">
+          <button class="adj-btn" onclick="adjustRoom(-1)">−</button>
+          <div id="room-val">T3</div>
+          <button class="adj-btn" onclick="adjustRoom(+1)">+</button>
+        </div>
+        <div class="temp-small-label">Wanted temperature</div>
+        <div class="sched-badge" id="sched-badge">📅 Scheduled</div>
+      </div>
+    </div>
+    <!-- Secondary: stove internals (de-emphasised) -->
+    <div class="stove-tech-row">
+      <span>Stove <span id="stove-temp">—°</span></span>
+      <span style="opacity:.5">·</span>
+      <span>Setpoint <span id="setpoint-val">—°</span></span>
+    </div>
+  </div>
+
+  <!-- ── Log Cartridges ── -->
+  <div class="card">
+    <div class="section-title">Log Cartridges</div>
+    <div class="cart-grid">
+
+      <!-- Left -->
+      <div class="cart-col left">
+        <div class="cart-title">Left</div>
+        <div class="bars" id="bars-left"></div>
+        <div class="cart-count" id="count-left">—</div>
+        <div class="cart-btn-stack">
+          <button class="btn btn-green"  onclick="unlockDoor('l')">Unlock</button>
+          <button class="btn btn-orange" onclick="publish('cmd/motor_home',mapSide('l'))">Rewind</button>
+          <button class="btn btn-brown"  onclick="updateLogCount('l')">Update log count</button>
+        </div>
+      </div>
+
+      <!-- Time left -->
+      <div class="time-col">
+        <div class="time-label">Time<br>Left</div>
+        <div class="time-val" id="burn-time-val">—</div>
+        <div class="time-unit" id="burn-time-unit">estimated</div>
+      </div>
+
+      <!-- Right -->
+      <div class="cart-col right">
+        <div class="cart-title">Right</div>
+        <div class="bars" id="bars-right"></div>
+        <div class="cart-count" id="count-right">—</div>
+        <div class="cart-btn-stack">
+          <button class="btn btn-green"  onclick="unlockDoor('r')">Unlock</button>
+          <button class="btn btn-orange" onclick="publish('cmd/motor_home',mapSide('r'))">Rewind</button>
+          <button class="btn btn-brown"  onclick="updateLogCount('r')">Update log count</button>
+        </div>
+      </div>
+
+    </div>
+
+
+  </div>
+
+  <!-- ── Settings ── -->
+  <div class="card">
+    <div class="settings-toggle" onclick="toggleSettings()">
+      <span style="font-weight:700;color:#8B4513">Settings</span>
+      <span class="arrow" id="settings-arrow">▼</span>
+    </div>
+    <div class="settings-body" id="settings-body">
+
+      <!-- Maintenance alerts -->
+      <div>
+        <div class="settings-section">Maintenance Alerts</div>
+        <div class="gap-col">
+          <div class="alert-row">
+            <div class="alert-fields">
+              <input type="email" id="alert-email-1" placeholder="Email address"/>
+              <select id="alert-op-1" onchange="onAlertOpChange(1)">
+                <option value="0">No SMS</option>
+                <option value="1">Orange</option>
+                <option value="2">SFR</option>
+                <option value="3">Bouygues</option>
+                <option value="4">Free Mobile</option>
+              </select>
+              <div id="alert-phone-wrap-1" style="display:none;">
+                <input type="tel" id="alert-phone-1" placeholder="Phone (e.g. 0612345678)" style="width:100%;box-sizing:border-box;"/>
+              </div>
+              <div id="alert-free-wrap-1" style="display:none;">
+                <input type="text"     id="alert-free-uid-1" placeholder="Free subscriber ID" style="width:100%;box-sizing:border-box;margin-bottom:4px;"/>
+                <input type="password" id="alert-free-key-1" placeholder="Free API key"       style="width:100%;box-sizing:border-box;"/>
+              </div>
+            </div>
+            <input type="checkbox" id="alert-en-1" checked/>
+          </div>
+          <div class="alert-row">
+            <div class="alert-fields">
+              <input type="email" id="alert-email-2" placeholder="Email address"/>
+              <select id="alert-op-2" onchange="onAlertOpChange(2)">
+                <option value="0">No SMS</option>
+                <option value="1">Orange</option>
+                <option value="2">SFR</option>
+                <option value="3">Bouygues</option>
+                <option value="4">Free Mobile</option>
+              </select>
+              <div id="alert-phone-wrap-2" style="display:none;">
+                <input type="tel" id="alert-phone-2" placeholder="Phone (e.g. 0612345678)" style="width:100%;box-sizing:border-box;"/>
+              </div>
+              <div id="alert-free-wrap-2" style="display:none;">
+                <input type="text"     id="alert-free-uid-2" placeholder="Free subscriber ID" style="width:100%;box-sizing:border-box;margin-bottom:4px;"/>
+                <input type="password" id="alert-free-key-2" placeholder="Free API key"       style="width:100%;box-sizing:border-box;"/>
+              </div>
+            </div>
+            <input type="checkbox" id="alert-en-2"/>
+          </div>
+          <div class="alert-row">
+            <div class="alert-fields">
+              <input type="email" id="alert-email-3" placeholder="Email address"/>
+              <select id="alert-op-3" onchange="onAlertOpChange(3)">
+                <option value="0">No SMS</option>
+                <option value="1">Orange</option>
+                <option value="2">SFR</option>
+                <option value="3">Bouygues</option>
+                <option value="4">Free Mobile</option>
+              </select>
+              <div id="alert-phone-wrap-3" style="display:none;">
+                <input type="tel" id="alert-phone-3" placeholder="Phone (e.g. 0612345678)" style="width:100%;box-sizing:border-box;"/>
+              </div>
+              <div id="alert-free-wrap-3" style="display:none;">
+                <input type="text"     id="alert-free-uid-3" placeholder="Free subscriber ID" style="width:100%;box-sizing:border-box;margin-bottom:4px;"/>
+                <input type="password" id="alert-free-key-3" placeholder="Free API key"       style="width:100%;box-sizing:border-box;"/>
+              </div>
+            </div>
+            <input type="checkbox" id="alert-en-3"/>
+          </div>
+          <button class="btn btn-brown btn-sm btn-full" onclick="saveAlerts()">Save alerts</button>
+        </div>
+        <div class="divider"></div>
+        <!-- Push notifications -->
+        <div>
+          <div class="settings-section">Push Notifications</div>
+          <div class="gap-col">
+            <div style="font-size:.82rem;opacity:.75;margin-bottom:4px">Get notified even when the app is closed — fault, empty cartridge, low cartridge.</div>
+            <button class="btn btn-brown btn-sm btn-full" id="push-enable-btn" onclick="enablePushNotifications()">🔔 Enable Push Notifications</button>
+            <button class="btn btn-sm btn-full" id="push-disable-btn" style="display:none;background:#888;color:#fff" onclick="disablePushNotifications()">Disable Push Notifications</button>
+            <div id="push-notif-status" style="font-size:.8rem;margin-top:2px;opacity:.7;text-align:center"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Maintenance reminders -->
+      <div>
+        <div class="settings-section">Maintenance Reminders</div>
+        <div class="gap-col">
+          <div class="maint-row">
+            <span class="maint-lbl">Replace Joint</span>
+            <span class="maint-val" id="joint-days">— days</span>
+            <button class="btn btn-brown btn-sm" style="flex:none" onclick="replaceJoint()">Check</button>
+          </div>
+          <div class="maint-row">
+            <span class="maint-lbl">Ramonage</span>
+            <span class="maint-val" id="ramon-days">— days since last</span>
+          </div>
+          <div class="maint-row">
+            <span class="maint-lbl">Replace door seal</span>
+            <span class="maint-val" id="seal-days">— days</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- House parameters -->
+      <div>
+        <div class="settings-section">House Parameters</div>
+        <div class="gap-col">
+          <div class="param-row">
+            <label>Size</label>
+            <input type="number" id="house-size" placeholder="Volume" min="0"/>
+            <label>m³</label>
+          </div>
+          <div>
+            <div style="font-size:.82rem;color:#777;margin-bottom:7px">Insulation</div>
+            <div class="ins-wrap">
+              <button class="ins-btn" id="ins-poor"    onclick="setInsulation('poor')">Poor</button>
+              <button class="ins-btn" id="ins-average" onclick="setInsulation('average')">Average</button>
+              <button class="ins-btn" id="ins-good"    onclick="setInsulation('good')">Good</button>
+            </div>
+          </div>
+          <button class="btn btn-brown btn-sm btn-full" onclick="saveHouseParams()">Save house parameters</button>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Disconnect -->
+      <button class="btn btn-gray btn-full" onclick="disconnect()">Disconnect</button>
+
+    </div>
+  </div>
+
+  <!-- ── Options ── -->
+  <div class="card">
+    <div class="settings-toggle" onclick="toggleOptions()">
+      <span style="font-weight:700;color:#8B4513">Options</span>
+      <span class="arrow" id="options-arrow">▼</span>
+    </div>
+    <div class="settings-body" id="options-body">
+      <div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <span style="font-size:.85rem;font-weight:600;color:#5a3015">Enable Schedule</span>
+          <label class="tgl"><input type="checkbox" id="tog-sched-enable" onchange="setSchedEnabled(this.checked)"><span class="tgl-sl"></span></label>
+        </div>
+        <div class="settings-section">Temperature Schedule</div>
+        <div style="font-size:.78rem;color:#888;margin-bottom:10px">Drag points to set comfort level per 2-hour block (T1–T6)</div>
+        <svg id="schedule-svg" width="100%" viewBox="0 0 320 155" style="display:block;touch-action:none;overflow:visible"></svg>
+        <div id="sched-status" style="font-size:.78rem;color:#8B4513;margin-top:8px;text-align:center;min-height:1.2em"></div>
+        <button class="btn btn-brown btn-sm btn-full" style="margin-top:8px" onclick="saveSchedule()">Save &amp; Apply Schedule</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Heap Monitor ── -->
+  <div id="heap-monitor" style="display:none">
+    <div class="heap-row">
+      <span class="heap-lbl">Heap</span>
+      <div class="heap-bar-wrap"><div class="heap-bar-fill" id="heap-bar"></div></div>
+      <span class="heap-val" id="heap-free-val">—</span>
+      <span class="heap-lbl">·  min</span>
+      <span class="heap-val" id="heap-min-val">—</span>
+    </div>
+  </div>
+
+  <!-- ── Technical Mode ── -->
+  <div class="card">
+    <div class="settings-toggle" onclick="toggleTechMode()">
+      <span style="font-weight:700;color:#8B4513">⚙ Technical Mode</span>
+      <span class="arrow" id="tech-arrow">▼</span>
+    </div>
+    <div class="settings-body" id="tech-body">
+
+      <!-- SIDE SELECTOR -->
+      <div>
+        <div class="tech-sec">Active Side</div>
+        <div class="side-sel">
+          <div class="side-opt active" id="side-opt-l" onclick="selectSide('l')">◀ LEFT</div>
+          <div class="side-opt"        id="side-opt-r" onclick="selectSide('r')">RIGHT ▶</div>
+        </div>
+        <div class="row-btns" style="margin-top:10px">
+          <button class="btn btn-green"  onclick="techUnlockDoor()">🔓 Unlock Door</button>
+          <button class="btn btn-orange" onclick="techRewind()">↺ Rewind</button>
+        </div>
+      </div>
+
+      <hr class="divider">
+
+      <!-- FAN CONTROL -->
+      <div>
+        <div class="tech-sec">Fan Control</div>
+        <div class="side-sel" style="margin-bottom:6px">
+          <div class="side-opt active" id="fan-mode-auto"   onclick="setFanMode(false)">⚡ AUTO</div>
+          <div class="side-opt"        id="fan-mode-manual" onclick="setFanMode(true)">✋ MANUAL</div>
+        </div>
+        <div style="display:flex;gap:10px;justify-content:center;margin:2px 0 6px;font-size:.72rem;color:#888">
+          <span>Main&thinsp;<b id="fan-main-live" style="color:#5a2d0c;font-size:.82rem">—</b>%</span>
+          <span style="color:#ccc">|</span>
+          <span>Cool&thinsp;<b id="fan-cooling-live" style="color:#5a2d0c;font-size:.82rem">—</b>%</span>
+        </div>
+        <div id="fan-manual-ctrls" class="tech-manual-block" style="display:none">
+          <div>
+            <div class="tech-field-lbl">Main Fan Speed (%)</div>
+            <input id="fan-main-val" class="tech-input" type="number" min="0" max="100" value="50">
+          </div>
+          <div>
+            <div class="tech-field-lbl">Cooling Fan Speed (%)</div>
+            <input id="fan-cooling-val" class="tech-input" type="number" min="0" max="100" value="30">
+          </div>
+          <button class="btn btn-brown btn-full" onclick="applyFanSpeeds()">Apply Fan Speeds</button>
+        </div>
+      </div>
+
+      <hr class="divider">
+
+      <!-- AUTOMATIC INSERTION -->
+      <div>
+        <div class="tech-sec">Automatic Insertion</div>
+        <div class="toggle-wrap">
+          <span class="toggle-label">Auto Insertion</span>
+          <label class="tgl"><input type="checkbox" id="tog-auto-insert" onchange="setAutoInsertEn(this.checked)"><span class="tgl-sl"></span></label>
+        </div>
+        <button class="btn btn-red btn-full" id="manual-insert-btn" style="margin-top:12px;display:none" onclick="techInsert()">▶▶ Manually Insert Log</button>
+      </div>
+
+      <hr class="divider">
+
+      <!-- TEMPERATURE CONTROL -->
+      <div>
+        <div class="tech-sec">Temperature Control</div>
+        <div class="toggle-wrap">
+          <span class="toggle-label">Auto Setpoint</span>
+          <label class="tgl"><input type="checkbox" id="tog-auto-setpoint" onchange="setAutoSP(this.checked)"><span class="tgl-sl"></span></label>
+        </div>
+        <div id="setpoint-manual-ctrls" style="display:none;margin-top:10px">
+          <div class="tech-field-lbl">Manual Setpoint (°C)</div>
+          <input id="tech-setpoint-input" class="tech-input" type="number" min="100" max="500" value="325">
+          <button class="btn btn-brown btn-full" style="margin-top:8px" onclick="applySetpoint()">Apply Setpoint</button>
+        </div>
+      </div>
+
+      <hr class="divider">
+
+      <!-- SYSTEM OPTIONS -->
+      <div>
+        <div class="tech-sec">System Options</div>
+        <div class="toggle-wrap">
+          <span class="toggle-label">Beeper</span>
+          <label class="tgl"><input type="checkbox" id="tog-beeper" onchange="setBeeperEn(this.checked)"><span class="tgl-sl"></span></label>
+        </div>
+        <div class="toggle-wrap" style="margin-top:12px">
+          <span class="toggle-label">Max Temp Protection</span>
+          <label class="tgl"><input type="checkbox" id="tog-max-temp" onchange="setMaxTempEnabled(this.checked)"><span class="tgl-sl"></span></label>
+        </div>
+        <div id="max-temp-val-row" style="display:none;margin-top:10px">
+          <div class="tech-field-lbl">Fan-cap threshold (°C)</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="max-temp-threshold" class="tech-input" type="number" min="200" max="600" value="500" style="flex:1">
+            <button class="btn btn-brown btn-sm" style="flex:none" onclick="applyMaxTemp()">Set</button>
+          </div>
+        </div>
+        <div class="toggle-wrap" style="margin-top:12px">
+          <span class="toggle-label">🍃 Eco Mode <span style="font-size:.75rem;color:rgba(255,255,255,.55);font-weight:400">(51% floor)</span></span>
+          <label class="tgl"><input type="checkbox" id="tog-eco-mode" onchange="setEcoMode(this.checked)"><span class="tgl-sl"></span></label>
+        </div>
+        <div id="normal-floor-row" style="display:none;margin-top:10px">
+          <div class="tech-field-lbl">Normal mode cruise floor (%)</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="normal-floor-val" class="tech-input" type="number" min="0" max="70" value="65" style="flex:1">
+            <button class="btn btn-brown btn-sm" style="flex:none" onclick="applyNormalFloor()">Set</button>
+          </div>
+        </div>
+      </div>
+
+      <hr class="divider">
+
+      <!-- MANUAL MOTOR CONTROL -->
+      <div>
+        <div class="tech-sec">Manual Motor Control<span id="motor-side-lbl" class="side-badge">◀ L</span></div>
+        <div class="tech-field-lbl">Steps</div>
+        <input id="motor-steps" class="tech-input" type="number" value="200" min="1" max="9999">
+        <div class="row-btns" style="margin-top:10px;margin-bottom:8px">
+          <button class="btn btn-brown" onclick="techMotor('forward')">▶ Forward</button>
+          <button class="btn btn-brown" onclick="techMotor('backward')">◀ Backward</button>
+        </div>
+        <div class="row-btns">
+          <button class="btn btn-gray" onclick="publish('cmd/motor_stop','1')">⏹ Stop</button>
+          <button class="btn btn-blue" onclick="publish('cmd/motor_home', mapSide(techSide))">🏠 Home</button>
+        </div>
+      </div>
+
+      <hr class="divider">
+
+      <!-- MANUAL PISTON CONTROL -->
+      <div>
+        <div class="tech-sec">Manual Piston Control<span id="piston-side-lbl" class="side-badge">◀ L</span></div>
+        <div class="row-btns" style="margin-bottom:8px">
+          <button class="btn btn-green"  onclick="techPiston('extend')">↑ Extend</button>
+          <button class="btn btn-orange" onclick="techPiston('retract')">↓ Retract</button>
+        </div>
+        <div class="row-btns">
+          <button class="btn btn-gray" onclick="techPiston('stop')">⏹ Stop</button>
+          <button class="btn btn-gray" onclick="techPiston('tare')">⊕ Tare</button>
+        </div>
+      </div>
+
+      <hr class="divider">
+
+      <!-- SIM TEMP (INPUT_TEMP firmware build only) -->
+      <div>
+        <div class="tech-sec">Simulated Stove Temp</div>
+        <div class="tech-field-lbl">Override thermocouple (°C) — requires INPUT_TEMP firmware</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input id="sim-temp-val" class="tech-input" type="number" min="0" max="1000" value="300" placeholder="°C" style="flex:1">
+          <button class="btn btn-brown btn-sm" style="flex:none" onclick="setSimTemp()">Set</button>
+        </div>
+      </div>
+
+      <!-- SYSTEM CONTROL -->
+      <div>
+        <div class="tech-sec">System Control</div>
+        <button class="btn btn-red btn-full" onclick="techReset()">↺ Reset ESP32</button>
+        <p style="font-size:.72rem;color:#aaa;margin-top:8px;text-align:center">Warning: This will restart the controller</p>
+        <p style="font-size:.7rem;color:#bbb;margin-top:4px;text-align:center">Version · Mar 2026</p>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── Footer ── -->
+  <div style="text-align:center;font-size:.72rem;color:rgba(255,255,255,.5);padding-bottom:8px">
+    WoodMood · <span id="footer-serial">—</span><span id="footer-ota"></span>
+  </div>
+
+</div>
+
+<!-- ── Toast ── -->
+<div id="toast"></div>
+
+<!-- ── Offline overlay ── -->
+<div id="offline-overlay">
+  <div class="offline-box">
+    <h2>Disconnected</h2>
+    <p>Lost connection to broker.<br>Reconnecting automatically…</p>
+    <button class="btn btn-brown btn-full" onclick="reconnect()">Retry now</button>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// CONFIGURATION
+// ============================================================
+const SWAP_SIDES = false;   // true = swap left/right relative to firmware, false = no swap
+
+// ============================================================
+// STATE
+// ============================================================
+const LS        = 'woodmood_cfg';
+const LS_ALERTS = 'woodmood_alerts';
+const LS_HOUSE  = 'woodmood_house';
+const LS_SCHED    = 'woodmood_schedule';
+const LS_SCHED_EN = 'woodmood_sched_enabled';
+
+let cfg              = JSON.parse(localStorage.getItem(LS) || '{}');
+let client           = null;
+let prefix           = '';
+let roomTemp         = 20;
+let lastHbTime       = 0;
+let hbTimer          = null;
+let offlineTimer     = null;
+let settingsOpen     = false;
+let systemState      = 'startup';   // startup | auto | cooldown | fault
+let faultSide            = null;    // 'l' | 'r'
+let faultReady           = false;   // firmware signals fault can be resolved
+let faultCountdownActive = false;   // local 10-s countdown is running
+let faultCountdownTimer  = null;
+let insulation       = null;
+let schedTemps       = Array(12).fill(20);
+let schedEnabled     = false;
+let schedDrag        = null;
+let schedSlotTimer   = null;
+let lastSchedSlot    = -1;
+let optionsOpen      = false;
+
+// Derived state tracking
+let stoveTemp          = null;   // latest stove temp (°C) from MQTT
+let setpointVal        = null;   // latest setpoint (°C) from MQTT
+let sysActive          = false;  // system_active from status/full
+let faultActive        = false;  // fault active flag
+let inCooldown         = false;  // user manually entered cooldown (optimistic)
+let remoteStateReceived= false;  // true once firmware sends status/system_state
+let logL               = 0;      // current left log count
+let logR               = 0;      // current right log count
+let bleRoomTemp        = null;   // BLE room sensor temperature (°C), null = unavailable
+let bleRoomTempOk      = false;  // true when BLE sensor has a valid reading
+let lastKnownBleTemp   = null;   // last valid BLE reading — shown when sensor goes offline
+
+// ── Pending-command lock — prevents MQTT rubber-banding toggles ──
+const pendingCmds = {};
+const PENDING_TTL = 4000; // ms — ignore MQTT updates for this long after a command
+function lockField(f) { pendingCmds[f] = Date.now() + PENDING_TTL; }
+function isLocked(f)  { return !!(pendingCmds[f] && Date.now() < pendingCmds[f]); }
+
+// ============================================================
+// INIT
+// ============================================================
+window.addEventListener('load', () => {
+  loadSettings();
+  initSchedule();
+  // Restore last known wanted temp from localStorage so the display is never
+  // wrong on a fresh page load (before the first MQTT status arrives).
+  const savedRoom = parseInt(localStorage.getItem('woodmood_room_temp'));
+  if (savedRoom >= 18 && savedRoom <= 23) roomTemp = savedRoom;
+  if (cfg.broker && cfg.user && cfg.pass && cfg.serial) {
+    fillForm();
+    document.getElementById('conn-card').style.display = 'none';
+    connect();
+  }
+  renderBars('left',  0);
+  renderBars('right', 0);
+  document.getElementById('room-val').textContent = tempToLabel(roomTemp);
+});
+
+function fillForm() {
+  document.getElementById('cfg-broker').value = cfg.broker || '';
+  document.getElementById('cfg-user').value   = cfg.user   || '';
+  document.getElementById('cfg-pass').value   = cfg.pass   || '';
+  document.getElementById('cfg-serial').value = cfg.serial || '';
+}
+
+function toggleConnPanel() {
+  const card = document.getElementById('conn-card');
+  card.style.display = card.style.display === 'none' ? '' : 'none';
+  if (card.style.display !== 'none') fillForm();
+}
+
+// ============================================================
+// CONNECTION
+// ============================================================
+function saveAndConnect() {
+  cfg.broker = document.getElementById('cfg-broker').value.trim();
+  cfg.user   = document.getElementById('cfg-user').value.trim();
+  cfg.pass   = document.getElementById('cfg-pass').value.trim();
+  cfg.serial = document.getElementById('cfg-serial').value.trim();
+  if (!cfg.broker || !cfg.user || !cfg.serial) { alert('Fill in all fields'); return; }
+  localStorage.setItem(LS, JSON.stringify(cfg));
+  document.getElementById('conn-card').style.display = 'none';
+  connect();
+}
+
+function connect() {
+  prefix = 'WoodMood' + cfg.serial;
+  setDotState('connecting');
+
+  if (client) { try { client.end(true); } catch(e){} }
+
+  client = mqtt.connect(`wss://${cfg.broker}:8884/mqtt`, {
+    username:        cfg.user,
+    password:        cfg.pass,
+    clientId:        'woodmood-web-' + Math.random().toString(16).substr(2,8),
+    keepalive:       60,
+    reconnectPeriod: 5000,
+    connectTimeout:  10000,
+    rejectUnauthorized: false
+  });
+
+  client.on('connect', () => {
+    setDotState('connected');   // orange — waiting for heartbeat
+    clearTimeout(offlineTimer);
+    offlineTimer = null;
+    document.getElementById('offline-overlay').classList.remove('show');
+    client.subscribe(prefix + '/status/#');
+    client.subscribe(prefix + '/schedule');
+    if (schedTemps.some(t => t !== 20))
+      client.publish(prefix + '/schedule', JSON.stringify(schedTemps), { qos:1, retain:true });
+    // Apply current schedule slot on (re)connect
+    lastSchedSlot = Math.floor(new Date().getHours() / 2);
+    applyScheduleSlot();
+    // Start slot-change watcher (checks every minute)
+    if (!schedSlotTimer) {
+      schedSlotTimer = setInterval(function() {
+        const slot = Math.floor(new Date().getHours() / 2);
+        if (slot !== lastSchedSlot) {
+          lastSchedSlot = slot;
+          applyScheduleSlot();
+        }
+      }, 60000);
+    }
+  });
+
+  client.on('message',   onMessage);
+  client.on('offline',   () => { setDotState('disconnected'); showOffline(); });
+  client.on('error',     () => { setDotState('disconnected'); });
+  client.on('reconnect', () => { setDotState('connecting');   });
+}
+
+function disconnect() {
+  if (client) { try { client.end(true); } catch(e){} client = null; }
+  setDotState('disconnected');
+  document.getElementById('conn-card').style.display = '';
+  fillForm();
+}
+
+function reconnect() {
+  document.getElementById('offline-overlay').classList.remove('show');
+  connect();
+}
+
+function setDotState(s) {
+  const dot   = document.getElementById('status-dot');
+  const label = document.getElementById('status-label');
+  dot.className = 'status-dot';
+  if      (s === 'connecting') { dot.classList.add('connecting'); label.textContent = 'Connecting…';  }
+  else if (s === 'connected')  { dot.classList.add('connected');  label.textContent = 'Connected';    }
+  else if (s === 'alive')      { dot.classList.add('alive');      label.textContent = 'Connected';    }
+  else                         {                                  label.textContent = 'Disconnected'; }
+}
+
+function showOffline() {
+  if (lastHbTime === 0 || offlineTimer) return;
+  offlineTimer = setTimeout(() => {
+    offlineTimer = null;
+    document.getElementById('offline-overlay').classList.add('show');
+  }, 5000);
+}
+
+// ============================================================
+// MQTT MESSAGES
+// ============================================================
+function onMessage(topic, payloadBuf) {
+  const payload = payloadBuf.toString();
+  const sub     = topic.replace(prefix + '/', '');
+
+  if (sub === 'schedule') {
+    try {
+      const arr = JSON.parse(payload);
+      if (Array.isArray(arr) && arr.length === 12) {
+        schedTemps = arr.map(t => Math.min(23, Math.max(18, Math.round(t))));
+        localStorage.setItem(LS_SCHED, JSON.stringify(schedTemps));
+        if (optionsOpen) renderScheduleSVG();
+      }
+    } catch(e) {}
+    return;
+  }
+
+  if (sub === 'status/heartbeat') {
+    publish('cmd/heartbeat_ack', '1');
+    lastHbTime = Date.now();
+    setDotState('alive');
+    clearTimeout(hbTimer);
+    hbTimer = setTimeout(() => setDotState('connected'), 31000);
+    return;
+  }
+
+  if (sub === 'status/full')       { try { applyFull(JSON.parse(payload)); } catch(e){} return; }
+  if (sub === 'status/fault')      { setFault(payload === '1'); return; }
+  if (sub === 'status/fault_msg')  { setFaultMsg(payload);      return; }
+  if (sub === 'status/fault_side') { const _s = payload.toLowerCase(); faultSide = (_s === 'right' || _s === 'r') ? 'r' : 'l'; if (faultActive) renderFaultPhase(); return; }
+
+  if (sub === 'status/temperature') {
+    stoveTemp = parseFloat(payload);
+    document.getElementById('stove-temp').textContent = payload + '°';
+    updateSystemState(); return;
+  }
+  if (sub === 'status/room_temp') {
+    const val = parseFloat(payload);
+    bleRoomTempOk = !isNaN(val) && val > -998;
+    bleRoomTemp   = bleRoomTempOk ? val : null;
+    updateBleRoomTemp(); return;
+  }
+  if (sub === 'status/log_level_l') {
+    const prevL = logL;
+    logL = parseInt(payload) || 0;
+    renderBars('left', logL);
+    document.getElementById('count-left').textContent = logL + ' logs';
+    if (logL === 0 && prevL !== 0) triggerPush('empty-L', '🪵 WoodMood — Left Cartridge Empty', 'Reload the left log cartridge');
+    else if (logL === 1 && prevL !== 1) triggerPush('low-L', '🪵 WoodMood — Left Cartridge Low', 'Only 1 log remaining on the left');
+    calcBurnTime(); return;
+  }
+  if (sub === 'status/log_level_r') {
+    const prevR = logR;
+    logR = parseInt(payload) || 0;
+    renderBars('right', logR);
+    document.getElementById('count-right').textContent = logR + ' logs';
+    if (logR === 0 && prevR !== 0) triggerPush('empty-R', '🪵 WoodMood — Right Cartridge Empty', 'Reload the right log cartridge');
+    else if (logR === 1 && prevR !== 1) triggerPush('low-R', '🪵 WoodMood — Right Cartridge Low', 'Only 1 log remaining on the right');
+    calcBurnTime(); return;
+  }
+  if (sub === 'status/system_state') {
+    remoteStateReceived = true;
+    if (!isLocked('system_state')) applySystemState(payload);
+    return;
+  }
+  if (sub === 'status/maint_joint')  { document.getElementById('joint-days').textContent = payload + ' days'; return; }
+  if (sub === 'status/maint_ramon')  { document.getElementById('ramon-days').textContent = payload + ' days since last'; return; }
+  if (sub === 'status/maint_seal')   { document.getElementById('seal-days').textContent  = payload + ' days'; return; }
+
+  if (sub === 'status/heap') {
+    try {
+      const h = JSON.parse(payload);
+      if (h.free !== undefined) applyHeap(h.free, h.min_free, h.max_alloc);
+    } catch(e) {}
+    return;
+  }
+}
+
+// ============================================================
+// FULL STATUS JSON
+// ============================================================
+function applyFull(d) {
+  if (d.stove_temp !== undefined) {
+    stoveTemp = parseFloat(d.stove_temp);
+    document.getElementById('stove-temp').textContent = d.stove_temp + '°';
+  }
+  if (d.setpoint !== undefined) {
+    setpointVal = parseFloat(d.setpoint);
+    document.getElementById('setpoint-val').textContent = d.setpoint + '°';
+  }
+  if (d.room_temp !== undefined) {
+    const val = parseFloat(d.room_temp);
+    bleRoomTempOk = (d.room_temp_ok !== undefined) ? !!d.room_temp_ok : (!isNaN(val) && val > -998);
+    bleRoomTemp   = bleRoomTempOk ? val : null;
+    updateBleRoomTemp();
+  }
+  if (d.log_l !== undefined) {
+    logL = parseInt(d.log_l) || 0;
+    renderBars('left', logL);
+    document.getElementById('count-left').textContent = logL + ' logs';
+  }
+  if (d.log_r !== undefined) {
+    logR = parseInt(d.log_r) || 0;
+    renderBars('right', logR);
+    document.getElementById('count-right').textContent = logR + ' logs';
+  }
+  // Sync wanted room temp from firmware echo — keeps all clients in sync.
+  // Skipped for 4 s after the local user taps +/- to avoid rubber-banding.
+  if (d.room_setpoint !== undefined && !isLocked('room_temp')) {
+    const r = parseInt(d.room_setpoint);
+    if (r >= 18 && r <= 23 && r !== roomTemp) {
+      roomTemp = r;
+      document.getElementById('room-val').textContent = tempToLabel(roomTemp);
+      localStorage.setItem('woodmood_room_temp', roomTemp);
+    }
+  }
+  if (d.system_active !== undefined) sysActive = !!d.system_active;
+  if (d.fault !== undefined) setFault(d.fault, d.fault_side, d.fault_ready);
+  if (d.system_state  !== undefined) { remoteStateReceived = true; if (!isLocked('system_state')) applySystemState(d.system_state); }
+  if (d.uptime !== undefined) {
+    const h = Math.floor(d.uptime/3600), m = Math.floor((d.uptime%3600)/60);
+    document.getElementById('footer-serial').textContent = 'up ' + h + 'h ' + m + 'm';
+  }
+  if (d.local_ip && d.local_ip !== '0.0.0.0') {
+    const el = document.getElementById('footer-ota');
+    if (el) el.innerHTML = '  ·  <a href="http://' + d.local_ip + '/update" target="_blank"'
+      + ' style="color:rgba(255,255,255,.5);text-decoration:none" title="Open OTA updater">'
+      + d.local_ip + '/update</a>'
+      + ' <span style="opacity:.55">pwd: &lt;MQTT password&gt;</span>';
+  }
+  if (d.heap_free !== undefined) applyHeap(d.heap_free, d.heap_min || 0, d.heap_max_alloc || 0);
+  if (d.maint_joint !== undefined) document.getElementById('joint-days').textContent = d.maint_joint + ' days';
+  if (d.maint_ramon !== undefined) document.getElementById('ramon-days').textContent = d.maint_ramon + ' days since last';
+  if (d.maint_seal  !== undefined) document.getElementById('seal-days').textContent  = d.maint_seal  + ' days';
+
+  applyTechState(d);
+  calcBurnTime();
+  updateSystemState();
+}
+
+// ============================================================
+// BLE ROOM TEMPERATURE
+// ============================================================
+function updateBleRoomTemp() {
+  const el  = document.getElementById('ble-room-temp');
+  const lbl = document.getElementById('ble-room-label');
+  if (!el) return;
+  if (bleRoomTempOk && bleRoomTemp !== null) {
+    lastKnownBleTemp = bleRoomTemp;
+    el.textContent      = bleRoomTemp.toFixed(1) + '°';
+    el.style.fontStyle  = 'normal';
+    el.style.opacity    = '1';
+    lbl.textContent     = 'Room temperature';
+    lbl.style.fontStyle = 'normal';
+  } else if (lastKnownBleTemp !== null) {
+    el.textContent      = lastKnownBleTemp.toFixed(1) + '°';
+    el.style.fontStyle  = 'italic';
+    el.style.opacity    = '0.65';
+    lbl.textContent     = 'Last measured';
+    lbl.style.fontStyle = 'italic';
+  } else {
+    el.textContent      = '—°';
+    el.style.fontStyle  = 'normal';
+    el.style.opacity    = '0.5';
+    lbl.textContent     = 'Room (no sensor)';
+    lbl.style.fontStyle = 'normal';
+  }
+}
+
+// ============================================================
+// SYSTEM STATE
+// ============================================================
+
+// Derive state from live data — used as fallback when firmware hasn't sent
+// status/system_state yet (e.g. older firmware or first connection).
+function updateSystemState() {
+  // Once the firmware is sending its own state, trust it — don't override.
+  if (remoteStateReceived) return;
+
+  if (faultActive)  { applySystemState('fault');    return; }
+  if (inCooldown)   { applySystemState('cooldown'); return; }
+
+  // Startup until stove reaches 85 % of setpoint (mirrors MODE_STARTUP on ESP32)
+  if (stoveTemp !== null && setpointVal !== null && setpointVal > 0) {
+    if (stoveTemp >= setpointVal * 0.85 && sysActive) {
+      applySystemState('auto');
+    } else {
+      applySystemState('startup');
+    }
+  } else {
+    applySystemState('startup');
+  }
+}
+
+// Render system state button — accepts both firmware strings and local strings.
+function applySystemState(state) {
+  systemState = state;
+  // Clean up cooldown flag when system reaches standby naturally
+  if (state === 'standby' || state === 'startup' || state === 'auto') {
+    if (state !== 'cooldown') inCooldown = false;
+  }
+  const btn    = document.getElementById('sys-btn');
+  const labels = {
+    startup:       'Startup',
+    auto:          'Automatic Operation',
+    cooldown:      'Cooldown',
+    standby:       'Off — Press to Start',
+    fault:         'Fault Condition',
+    shutting_down: 'Cooling Down',
+    active:        'Automatic Operation',  // legacy fallback
+  };
+  btn.textContent = labels[state] || state;
+  // Map firmware state names to CSS classes
+  const cssClass = state === 'active' ? 'auto'
+                 : state === 'shutting_down' ? 'cooldown'
+                 : (state || 'startup');
+  btn.className = 'sys-btn ' + cssClass;
+}
+
+function sysButtonClick() {
+  // Use CSS class as the authoritative source for the button's current state.
+  // This is a fallback safety net: if the `systemState` JS variable is stale,
+  // null, or mismatched (e.g. a duplicate MQTT message arrived out-of-order),
+  // we still handle the click correctly based on what the button visually shows.
+  const btn        = document.getElementById('sys-btn');
+  const btnState   = systemState || [...btn.classList].find(c => c !== 'sys-btn') || 'startup';
+
+  if (btnState === 'startup') {
+    const hot = stoveTemp !== null && stoveTemp > 150;
+    const msg = hot
+      ? 'Stove is hot (' + Math.round(stoveTemp) + '°). Switch to cooldown?'
+      : 'Stove is cold. Turn off system?';
+    if (!confirm(msg)) return;
+    inCooldown = true;
+    lockField('system_state');
+    publish('cmd/cooldown', '1');
+    applySystemState(hot ? 'cooldown' : 'standby');
+  } else if (btnState === 'auto' || btnState === 'active') {
+    if (!confirm('Switch to cooldown mode?')) return;
+    inCooldown = true;
+    lockField('system_state');
+    publish('cmd/cooldown', '1');
+    applySystemState('cooldown');
+  } else if (btnState === 'cooldown') {
+    if (!confirm('Cancel cooldown and return to automatic operation?')) return;
+    inCooldown = false;
+    lockField('system_state');
+    publish('cmd/cooldown', '0');
+    applySystemState('auto');
+  } else if (btnState === 'standby') {
+    // No confirm needed — button already reads "Off — Press to Start".
+    // The user explicitly tapped it; an extra dialog just adds friction and
+    // widens the timing window where a QoS-1 duplicate cooldown can slip through.
+    lockField('system_state');
+    publish('cmd/start', '1');
+    applySystemState('startup');
+  }
+}
+
+// ============================================================
+// FAULT
+// ============================================================
+function setFault(active, side, ready) {
+  const wasActive = faultActive;
+  faultActive = !!(active || active === '1' || active === true);
+  if (side !== undefined && side !== null) {
+    // Firmware sends "Right"/"Left" (full words) — normalize to 'r'/'l' for topic building
+    const s = String(side).toLowerCase();
+    faultSide = (s === 'right' || s === 'r') ? 'r' : 'l';
+  }
+  if (ready) faultReady = true;  // firmware can only SET faultReady, never clear it mid-fault
+  const banner = document.getElementById('fault-banner');
+  if (faultActive) {
+    banner.classList.add('show');
+    if (!wasActive) {
+      triggerPush('fault', '⚠️ WoodMood — Fault Detected', lastFaultMsg || 'The stove needs your attention');
+      // Fresh fault — reset to phase 1
+      clearFaultCountdown();
+      faultReady = false;
+    }
+    renderFaultPhase();
+  } else {
+    banner.classList.remove('show');
+    clearFaultCountdown();
+    faultReady = false;
+    const el = document.getElementById('fault-msg-text');
+    if (el) el.textContent = 'Log stuck in trapdoor — follow the steps below';
+  }
+  updateSystemState();
+}
+
+function renderFaultPhase() {
+  const sideLabel = (faultSide === 'r') ? 'Right' : 'Left';
+  // Update side badge and all side-name spans
+  const badge = document.getElementById('fault-side-badge');
+  if (badge) badge.textContent = sideLabel + ' Side';
+  document.querySelectorAll('.fault-side-name').forEach(function(el) {
+    el.textContent = sideLabel;
+  });
+  const p1 = document.getElementById('fault-phase-1');
+  const p2 = document.getElementById('fault-phase-2');
+  const p3 = document.getElementById('fault-phase-3');
+  if (faultReady) {
+    // Phase 3: firmware confirmed ready to resolve
+    clearFaultCountdown();
+    p1.style.display = 'none';
+    p2.style.display = 'none';
+    p3.style.display = '';
+  } else if (faultCountdownActive) {
+    // Phase 2: local countdown running
+    p1.style.display = 'none';
+    p2.style.display = '';
+    p3.style.display = 'none';
+  } else {
+    // Phase 1: waiting for user to unlock door
+    p1.style.display = '';
+    p2.style.display = 'none';
+    p3.style.display = 'none';
+  }
+}
+
+function faultUnlockDoor() {
+  const side = faultSide || 'l';
+  publish('cmd/door_' + side, '1');
+  showToast('Unlocking ' + (side === 'r' ? 'Right' : 'Left') + ' door…');
+  // Start 10-s local countdown (moves to phase 3 when done)
+  clearFaultCountdown();
+  faultCountdownActive = true;
+  let secs = 10;
+  document.getElementById('fault-countdown').textContent = secs;
+  renderFaultPhase();
+  faultCountdownTimer = setInterval(function() {
+    secs--;
+    document.getElementById('fault-countdown').textContent = secs;
+    if (secs <= 0) {
+      clearFaultCountdown();
+      faultReady = true;
+      renderFaultPhase();
+    }
+  }, 1000);
+}
+
+function clearFaultCountdown() {
+  clearInterval(faultCountdownTimer);
+  faultCountdownTimer  = null;
+  faultCountdownActive = false;
+}
+
+function resolveFault() {
+  publish('cmd/resolve_fault', '1');
+}
+
+function setFaultMsg(msg) {
+  if (!msg) return;
+  const el = document.getElementById('fault-msg-text');
+  if (el) el.textContent = msg;
+}
+
+// ============================================================
+// LOG CARTRIDGE BARS
+// ============================================================
+function renderBars(side, count) {
+  const MAX = 6;
+  const el  = document.getElementById('bars-' + side);
+  el.innerHTML = '';
+  for (let i = 0; i < MAX; i++) {
+    const bar = document.createElement('div');
+    bar.className = 'bar' + (i >= count ? ' empty' : '');
+    el.appendChild(bar);
+  }
+}
+
+// ============================================================
+// COMMANDS
+// ============================================================
+function publish(subtopic, payload) {
+  if (!client || !client.connected) { alert('Not connected to broker'); return; }
+  client.publish(prefix + '/' + subtopic, String(payload), { qos:1 });
+}
+
+function mapSide(s) { return SWAP_SIDES ? (s === 'l' ? 'r' : 'l') : s; }
+
+function adjustRoom(delta) {
+  roomTemp = Math.min(23, Math.max(18, (isNaN(roomTemp) ? 20 : roomTemp) + delta));
+  document.getElementById('room-val').textContent = tempToLabel(roomTemp);
+  localStorage.setItem('woodmood_room_temp', roomTemp);
+  lockField('room_temp');   // prevent MQTT echo from overwriting immediately after a tap
+  publish('cmd/room_temp', roomTemp);
+}
+
+function unlockDoor(side) {
+  if (!confirm('Unlock ' + (side==='l'?'LEFT':'RIGHT') + ' door?')) return;
+  publish('cmd/door_' + mapSide(side), '1');
+}
+
+function updateLogCount(side) {
+  const id  = side === 'l' ? 'count-left' : 'count-right';
+  const cur = document.getElementById(id).textContent.replace(' logs','').trim();
+  const val = prompt('Log count for ' + (side==='l'?'Left':'Right') + ' cartridge (0–6):', cur === '—' ? '0' : cur);
+  if (val === null) return;
+  const n = Math.min(6, Math.max(0, parseInt(val) || 0));
+  if (side === 'l') logL = n; else logR = n;
+  publish('cmd/log_level_' + mapSide(side), n);
+  renderBars(side === 'l' ? 'left' : 'right', n);
+  document.getElementById(id).textContent = n + ' logs';
+  calcBurnTime();
+}
+
+// ============================================================
+// BURN TIME — 40 min per log
+// ============================================================
+function calcBurnTime() {
+  const total    = logL + logR;
+  const el       = document.getElementById('burn-time-val');
+  const unitEl   = document.getElementById('burn-time-unit');
+  if (total === 0) { el.textContent = '—'; unitEl.textContent = ''; return; }
+  const totalMins = total * 40;
+  const h = Math.floor(totalMins / 60);
+  const m = totalMins % 60;
+  el.textContent   = h > 0 ? (m > 0 ? h + 'h ' + m + 'm' : h + 'h') : m + 'm';
+  unitEl.textContent = 'estimated';
+}
+
+// ============================================================
+// SIMULATE INSERTION — now triggers a real insertion sequence
+// ============================================================
+function simulateInsertion() {
+  if (!confirm('Trigger a real insertion sequence on the stove?')) return;
+  publish('cmd/insert', mapSide(techSide));
+  showToast('Insertion triggered — ' + (techSide === 'l' ? 'Left' : 'Right') + ' side');
+}
+
+// ============================================================
+// TECHNICAL MODE
+// ============================================================
+let techFanManual    = false;
+let techAutoInsertOn = true;
+let techAutoSP       = true;
+let techSide         = 'l';
+
+function selectSide(s) {
+  techSide = s;
+  document.getElementById('side-opt-l').classList.toggle('active', s === 'l');
+  document.getElementById('side-opt-r').classList.toggle('active', s === 'r');
+  // Update side badges on Motor and Piston section headers
+  const lbl = s === 'l' ? '◀ L' : 'R ▶';
+  ['motor-side-lbl', 'piston-side-lbl'].forEach(function(id) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = lbl;
+  });
+}
+
+function techUnlockDoor() {
+  publish('cmd/door_' + mapSide(techSide), '1');
+  showToast('Unlocking ' + (techSide === 'l' ? 'Left' : 'Right') + ' door…');
+}
+
+function techRewind() {
+  publish('cmd/motor_home', mapSide(techSide));
+  showToast('Rewinding ' + (techSide === 'l' ? 'Left' : 'Right') + ' cartridge…');
+}
+
+function toggleTechMode() {
+  const body  = document.getElementById('tech-body');
+  const arrow = document.getElementById('tech-arrow');
+  const open  = body.classList.contains('open');
+  body.classList.toggle('open', !open);
+  arrow.classList.toggle('open', !open);
+}
+
+function applyTechState(d) {
+  const focused = document.activeElement;
+  if (d.fan_mode !== undefined && !isLocked('fan_mode')) {
+    techFanManual = d.fan_mode === 'manual';
+    document.getElementById('fan-mode-auto').classList.toggle('active',   !techFanManual);
+    document.getElementById('fan-mode-manual').classList.toggle('active',  techFanManual);
+    document.getElementById('fan-manual-ctrls').style.display = techFanManual ? 'flex' : 'none';
+  }
+  // Live fan speed readout — always reflects actual firmware state
+  if (d.fan_main    !== undefined) document.getElementById('fan-main-live').textContent    = d.fan_main;
+  if (d.fan_cooling !== undefined) document.getElementById('fan-cooling-live').textContent = d.fan_cooling;
+  // Only sync fan/setpoint inputs when the user is not typing in them
+  // and no manual Set command is in flight (4 s lock after applyFanSpeeds).
+  if (d.fan_main !== undefined && !isLocked('fan_main')) {
+    const el = document.getElementById('fan-main-val');
+    if (el !== focused) el.value = d.fan_main;
+  }
+  if (d.fan_cooling !== undefined && !isLocked('fan_cooling')) {
+    const el = document.getElementById('fan-cooling-val');
+    if (el !== focused) el.value = d.fan_cooling;
+  }
+  if (d.auto_setpoint !== undefined && !isLocked('auto_setpoint')) {
+    techAutoSP = !!d.auto_setpoint;
+    document.getElementById('tog-auto-setpoint').checked = techAutoSP;
+    document.getElementById('setpoint-manual-ctrls').style.display = techAutoSP ? 'none' : 'block';
+  }
+  if (d.setpoint !== undefined) {
+    const el = document.getElementById('tech-setpoint-input');
+    if (el !== focused) el.value = d.setpoint;
+  }
+  if (d.beeper !== undefined && !isLocked('beeper'))
+    document.getElementById('tog-beeper').checked = !!d.beeper;
+  if (d.max_temp_prot !== undefined && !isLocked('max_temp_prot')) {
+    document.getElementById('tog-max-temp').checked = !!d.max_temp_prot;
+    document.getElementById('max-temp-val-row').style.display = d.max_temp_prot ? 'block' : 'none';
+  }
+  if (d.max_temp_val !== undefined) {
+    const el = document.getElementById('max-temp-threshold');
+    if (el !== focused) el.value = d.max_temp_val;
+  }
+  if (d.eco_mode !== undefined && !isLocked('eco_mode')) {
+    document.getElementById('tog-eco-mode').checked = !!d.eco_mode;
+    document.getElementById('normal-floor-row').style.display = d.eco_mode ? 'none' : 'block';
+  }
+  if (d.norm_floor !== undefined) {
+    const el = document.getElementById('normal-floor-val');
+    if (el !== focused) el.value = d.norm_floor;
+  }
+  if (d.auto_insert !== undefined && !isLocked('auto_insert')) {
+    techAutoInsertOn = !!d.auto_insert;
+    document.getElementById('tog-auto-insert').checked = techAutoInsertOn;
+    const mb = document.getElementById('manual-insert-btn');
+    if (mb) mb.style.display = techAutoInsertOn ? 'none' : '';
+  }
+  if (d.silence_mode !== undefined && !isLocked('silence_mode')) {
+    const on = !!d.silence_mode;
+    document.getElementById('silence-toggle').checked = on;
+    document.getElementById('silence-icon').classList.toggle('active', on);
+  }
+  // fault_ready is now handled entirely by setFault() above; no override here
+}
+
+function setSilenceMode(on) {
+  lockField('silence_mode');
+  publish('cmd/silence', on ? '1' : '0');
+  document.getElementById('silence-icon').classList.toggle('active', on);
+  showToast(on ? 'Silence mode ON — insertions paused' : 'Silence mode OFF');
+}
+
+function setBeeperEn(enabled) {
+  lockField('beeper');
+  publish('cmd/beeper', enabled ? '1' : '0');
+}
+
+function setFanMode(isManual) {
+  lockField('fan_mode');
+  techFanManual = isManual;
+  publish('cmd/fan_mode', isManual ? 'manual' : 'auto');
+  document.getElementById('fan-mode-auto').classList.toggle('active',   !isManual);
+  document.getElementById('fan-mode-manual').classList.toggle('active',  isManual);
+  document.getElementById('fan-manual-ctrls').style.display = isManual ? 'flex' : 'none';
+}
+
+function applyFanSpeeds() {
+  const m = Math.min(100, Math.max(0, parseInt(document.getElementById('fan-main-val').value)    || 0));
+  const c = Math.min(100, Math.max(0, parseInt(document.getElementById('fan-cooling-val').value) || 0));
+  lockField('fan_main');    // prevent MQTT from overwriting inputs for 4 s
+  lockField('fan_cooling');
+  publish('cmd/fan_main',    String(m));
+  publish('cmd/fan_cooling', String(c));
+  showToast('Fan speeds applied');
+}
+
+function setAutoSP(isAuto) {
+  lockField('auto_setpoint');
+  techAutoSP = isAuto;
+  publish('cmd/auto_setpoint', isAuto ? '1' : '0');
+  document.getElementById('setpoint-manual-ctrls').style.display = isAuto ? 'none' : 'block';
+}
+
+function applySetpoint() {
+  const sp = parseInt(document.getElementById('tech-setpoint-input').value) || 325;
+  publish('cmd/setpoint', String(sp));
+  showToast('Setpoint → ' + sp + '°C');
+}
+
+function setAutoInsertEn(enabled) {
+  lockField('auto_insert');
+  techAutoInsertOn = enabled;
+  publish('cmd/auto_insert_en', enabled ? '1' : '0');
+  const mb = document.getElementById('manual-insert-btn');
+  if (mb) mb.style.display = enabled ? 'none' : '';
+  showToast('Auto insertion ' + (enabled ? 'enabled' : 'disabled'));
+}
+
+function setMaxTempEnabled(enabled) {
+  lockField('max_temp_prot');
+  publish('cmd/max_temp', enabled ? '1' : '0');
+  document.getElementById('max-temp-val-row').style.display = enabled ? 'block' : 'none';
+}
+
+function applyMaxTemp() {
+  const val = parseInt(document.getElementById('max-temp-threshold').value) || 500;
+  publish('cmd/max_temp_val', String(val));
+  showToast('Max temp threshold \u2192 ' + val + '\u00b0C');
+}
+
+function setEcoMode(enabled) {
+  lockField('eco_mode');
+  publish('cmd/eco_mode', enabled ? '1' : '0');
+  document.getElementById('normal-floor-row').style.display = enabled ? 'none' : 'block';
+  showToast('Eco mode ' + (enabled ? 'ON \uD83C\uDF3F' : 'OFF'));
+}
+
+function applyNormalFloor() {
+  const val = Math.min(70, Math.max(0, parseInt(document.getElementById('normal-floor-val').value) || 65));
+  publish('cmd/normal_floor', String(val));
+  showToast('Normal cruise floor \u2192 ' + val + '%');
+}
+
+function techMotor(dir) {
+  const steps = parseInt(document.getElementById('motor-steps').value) || 200;
+  // Payload format: "<side>:<steps>"  e.g. "l:200"
+  publish('cmd/motor_' + dir, mapSide(techSide) + ':' + String(steps));
+  const sideName = techSide === 'l' ? 'Left' : 'Right';
+  showToast('Motor ' + dir + ' — ' + steps + ' steps (' + sideName + ')');
+}
+
+function techPiston(action) {
+  // Payload: mapped side — so firmware knows which physical side to operate
+  publish('cmd/piston_' + action, mapSide(techSide));
+  const labels = { extend:'Extend', retract:'Retract', stop:'Stop', tare:'Tare' };
+  const sideName = techSide === 'l' ? 'Left' : 'Right';
+  showToast('Piston ' + (labels[action] || action) + ' — ' + sideName);
+}
+
+function techInsert() {
+  const sideName = techSide === 'l' ? 'Left' : 'Right';
+  if (!confirm('Trigger insertion on the ' + sideName + ' side?')) return;
+  publish('cmd/insert', mapSide(techSide));
+  showToast('Insertion triggered — ' + sideName + ' side');
+}
+
+function techReset() {
+  if (!confirm('Restart the ESP32 controller?')) return;
+  publish('cmd/reset', '1');
+  showToast('ESP32 restarting…');
+}
+
+function setSimTemp() {
+  const t = parseFloat(document.getElementById('sim-temp-val').value);
+  if (isNaN(t) || t < 0 || t > 1000) { showToast('Enter 0–1000 °C'); return; }
+  publish('cmd/input_temp', String(t));
+  showToast('Sim temp → ' + t + '°C');
+}
+
+// ============================================================
+// TOAST
+// ============================================================
+let toastTimer = null;
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+// ============================================================
+// HEAP MONITOR
+// ============================================================
+function applyHeap(freeB, minFreeB, maxAllocB) {
+  const freeKB    = (freeB    / 1024).toFixed(1);
+  const minFreeKB = (minFreeB / 1024).toFixed(1);
+
+  document.getElementById('heap-free-val').textContent = freeKB    + ' KB';
+  document.getElementById('heap-min-val').textContent  = minFreeKB + ' KB';
+
+  // Bar: ESP32-S3 internal SRAM usable ~330 KB (rough upper bound)
+  const pct = Math.min(100, Math.round(freeB / 337920 * 100));
+  const bar = document.getElementById('heap-bar');
+  bar.style.width = pct + '%';
+
+  // Colour coding:  red < 20 KB  |  orange < 50 KB  |  green ≥ 50 KB
+  const colour = minFreeB < 20000 ? '#e74c3c' : minFreeB < 50000 ? '#f39c12' : '#2ecc71';
+  bar.style.background = colour;
+  document.getElementById('heap-min-val').style.color =
+    minFreeB < 20000 ? '#e74c3c' : minFreeB < 50000 ? '#f39c12' : 'rgba(255,255,255,.75)';
+}
+
+// ============================================================
+// SETTINGS — ALERTS
+// ============================================================
+function onAlertOpChange(i) {
+  const op = parseInt(document.getElementById('alert-op-' + i).value);
+  document.getElementById('alert-phone-wrap-' + i).style.display = (op > 0 && op < 4) ? 'block' : 'none';
+  document.getElementById('alert-free-wrap-'  + i).style.display = (op === 4)          ? 'block' : 'none';
+}
+
+function loadSettings() {
+  const alerts = JSON.parse(localStorage.getItem(LS_ALERTS) || '{}');
+  for (let i = 1; i <= 3; i++) {
+    if (alerts['email'+i]   !== undefined) document.getElementById('alert-email-'+i).value      = alerts['email'+i];
+    if (alerts['op'+i]      !== undefined) document.getElementById('alert-op-'+i).value         = alerts['op'+i];
+    if (alerts['phone'+i]   !== undefined) document.getElementById('alert-phone-'+i).value      = alerts['phone'+i];
+    if (alerts['freeUid'+i] !== undefined) document.getElementById('alert-free-uid-'+i).value   = alerts['freeUid'+i];
+    if (alerts['freeKey'+i] !== undefined) document.getElementById('alert-free-key-'+i).value   = alerts['freeKey'+i];
+    if (alerts['en'+i]      !== undefined) document.getElementById('alert-en-'+i).checked        = alerts['en'+i];
+    onAlertOpChange(i); // apply show/hide based on loaded operator
+  }
+  const house = JSON.parse(localStorage.getItem(LS_HOUSE) || '{}');
+  if (house.size)       document.getElementById('house-size').value = house.size;
+  if (house.insulation) setInsulation(house.insulation, false);
+}
+
+function saveAlerts() {
+  const alerts = {};
+  let anyEnabled = false;
+  for (let i = 1; i <= 3; i++) {
+    const op = parseInt(document.getElementById('alert-op-'+i).value);
+    alerts['email'+i]   = document.getElementById('alert-email-'+i).value.trim();
+    alerts['op'+i]      = op;
+    alerts['phone'+i]   = (op > 0 && op < 4) ? document.getElementById('alert-phone-'+i).value.trim() : '';
+    alerts['freeUid'+i] = (op === 4)          ? document.getElementById('alert-free-uid-'+i).value.trim() : '';
+    alerts['freeKey'+i] = (op === 4)          ? document.getElementById('alert-free-key-'+i).value.trim() : '';
+    alerts['en'+i]      = document.getElementById('alert-en-'+i).checked;
+    if (alerts['en'+i]) anyEnabled = true;
+  }
+  if (!anyEnabled) { alert('At least one alert must be enabled.'); return; }
+  localStorage.setItem(LS_ALERTS, JSON.stringify(alerts));
+  publish('cmd/alert_cfg', JSON.stringify(alerts));
+  alert('Alerts saved.');
+}
+
+// ============================================================
+// SETTINGS — MAINTENANCE
+// ============================================================
+function replaceJoint() {
+  const temp = parseFloat(document.getElementById('stove-temp').textContent);
+  if (!isNaN(temp) && temp > 100) {
+    alert('Stove is above 100°. Let it cool down before replacing the joint.');
+    return;
+  }
+  if (!confirm('Open trapdoor for joint replacement (5 seconds)?')) return;
+  const side = faultSide || 'l';
+  publish('cmd/door_' + side, '1');
+  setTimeout(() => publish('cmd/door_' + side, '0'), 5000);
+}
+
+// ============================================================
+// SETTINGS — HOUSE PARAMS
+// ============================================================
+function setInsulation(val, save = true) {
+  insulation = val;
+  ['poor','average','good'].forEach(v =>
+    document.getElementById('ins-'+v).classList.toggle('active', v === val)
+  );
+  if (save) saveHouseParamsLocal();
+}
+
+function saveHouseParamsLocal() {
+  localStorage.setItem(LS_HOUSE, JSON.stringify({
+    size: document.getElementById('house-size').value,
+    insulation
+  }));
+}
+
+function saveHouseParams() {
+  saveHouseParamsLocal();
+  publish('cmd/house_params', JSON.stringify({
+    size: document.getElementById('house-size').value,
+    insulation
+  }));
+  alert('House parameters saved.');
+}
+
+// ============================================================
+// UI TOGGLES
+// ============================================================
+function toggleSettings() {
+  settingsOpen = !settingsOpen;
+  document.getElementById('settings-body').classList.toggle('open', settingsOpen);
+  document.getElementById('settings-arrow').classList.toggle('open', settingsOpen);
+}
+
+// ============================================================
+// OPTIONS — TEMPERATURE SCHEDULE
+// ============================================================
+const SCHED_SLOTS = 12, SCHED_TMIN = 18, SCHED_TMAX = 23;
+const SPL = 28, SPR = 312, SPT = 10, SPB = 133;
+const SPW = SPR - SPL, SPH = SPB - SPT;
+
+function spX(i)     { return SPL + i * SPW / (SCHED_SLOTS - 1); }
+function spY(t)     { return SPT + (SCHED_TMAX - t) / (SCHED_TMAX - SCHED_TMIN) * SPH; }
+function spYtoT(py) { return Math.round(Math.min(SCHED_TMAX, Math.max(SCHED_TMIN, SCHED_TMAX - (py - SPT) / SPH * (SCHED_TMAX - SCHED_TMIN)))); }
+function tempToLabel(t) { return 'T' + (t - SCHED_TMIN + 1); }  // 18→T1, 19→T2 … 23→T6
+
+function initSchedule() {
+  const saved = JSON.parse(localStorage.getItem(LS_SCHED) || 'null');
+  if (Array.isArray(saved) && saved.length === SCHED_SLOTS)
+    schedTemps = saved.map(t => Math.min(SCHED_TMAX, Math.max(SCHED_TMIN, Math.round(t))));
+  schedEnabled = localStorage.getItem(LS_SCHED_EN) === '1';
+  document.getElementById('sched-badge').classList.toggle('active', schedEnabled);
+}
+
+function toggleOptions() {
+  optionsOpen = !optionsOpen;
+  document.getElementById('options-body').classList.toggle('open', optionsOpen);
+  document.getElementById('options-arrow').classList.toggle('open', optionsOpen);
+  if (optionsOpen) {
+    document.getElementById('tog-sched-enable').checked = schedEnabled;
+    renderScheduleSVG();
+    updateSchedStatus();
+  }
+}
+
+function setSchedEnabled(on) {
+  schedEnabled = on;
+  localStorage.setItem(LS_SCHED_EN, on ? '1' : '0');
+  document.getElementById('sched-badge').classList.toggle('active', on);
+  updateSchedStatus();
+  if (on) applyScheduleSlot();
+}
+
+function applyScheduleSlot() {
+  if (!schedEnabled || !client || !client.connected) return;
+  const slot = Math.floor(new Date().getHours() / 2);
+  const t = schedTemps[slot];
+  if (t < SCHED_TMIN || t > SCHED_TMAX) return;
+  roomTemp = t;
+  document.getElementById('room-val').textContent = tempToLabel(roomTemp);
+  localStorage.setItem('woodmood_room_temp', roomTemp);
+  lockField('room_temp');
+  publish('cmd/room_temp', roomTemp);
+}
+
+function updateSchedStatus() {
+  const el = document.getElementById('sched-status');
+  if (!el) return;
+  if (!schedEnabled) { el.textContent = ''; return; }
+  const slot = Math.floor(new Date().getHours() / 2);
+  const t = schedTemps[slot];
+  const nextSlot = (slot + 1) % SCHED_SLOTS;
+  el.textContent = 'Now (' + (slot*2) + 'h–' + (slot*2+2) + 'h): ' + tempToLabel(t) + '  →  Next: ' + tempToLabel(schedTemps[nextSlot]);
+}
+
+function smoothPath(pts) {
+  if (pts.length < 2) return '';
+  let d = 'M ' + pts[0].x.toFixed(1) + ' ' + pts[0].y.toFixed(1);
+  for (let i = 1; i < pts.length; i++) {
+    const p0 = pts[Math.max(0, i - 2)];
+    const p1 = pts[i - 1];
+    const p2 = pts[i];
+    const p3 = pts[Math.min(pts.length - 1, i + 1)];
+    const cp1x = (p1.x + (p2.x - p0.x) / 6).toFixed(1);
+    const cp1y = (p1.y + (p2.y - p0.y) / 6).toFixed(1);
+    const cp2x = (p2.x - (p3.x - p1.x) / 6).toFixed(1);
+    const cp2y = (p2.y - (p3.y - p1.y) / 6).toFixed(1);
+    d += ' C ' + cp1x + ' ' + cp1y + ' ' + cp2x + ' ' + cp2y + ' ' + p2.x.toFixed(1) + ' ' + p2.y.toFixed(1);
+  }
+  return d;
+}
+
+function renderScheduleSVG() {
+  const svg = document.getElementById('schedule-svg');
+  if (!svg) return;
+  const ns = 'http://www.w3.org/2000/svg';
+  svg.innerHTML = '';
+
+  // Gradient def
+  const defs = document.createElementNS(ns, 'defs');
+  const grad = document.createElementNS(ns, 'linearGradient');
+  grad.setAttribute('id', 'sched-grad'); grad.setAttribute('x1','0'); grad.setAttribute('y1','0'); grad.setAttribute('x2','0'); grad.setAttribute('y2','1');
+  const s1 = document.createElementNS(ns, 'stop'); s1.setAttribute('offset','0%');   s1.setAttribute('stop-color','#CD853F'); s1.setAttribute('stop-opacity','0.28');
+  const s2 = document.createElementNS(ns, 'stop'); s2.setAttribute('offset','100%'); s2.setAttribute('stop-color','#CD853F'); s2.setAttribute('stop-opacity','0.02');
+  grad.appendChild(s1); grad.appendChild(s2); defs.appendChild(grad); svg.appendChild(defs);
+
+  // Horizontal grid lines + y-axis labels
+  for (let t = SCHED_TMIN; t <= SCHED_TMAX; t++) {
+    const y = spY(t);
+    const gl = document.createElementNS(ns, 'line');
+    gl.setAttribute('x1', SPL); gl.setAttribute('x2', SPR);
+    gl.setAttribute('y1', y);  gl.setAttribute('y2', y);
+    gl.setAttribute('stroke', t === 20 ? '#e0c8b0' : '#f5ede4');
+    gl.setAttribute('stroke-width', t === 20 ? '1.2' : '0.7');
+    svg.appendChild(gl);
+    const lbl = document.createElementNS(ns, 'text');
+    lbl.setAttribute('x', SPL - 4); lbl.setAttribute('y', y + 3.5);
+    lbl.setAttribute('text-anchor', 'end'); lbl.setAttribute('font-size', '9');
+    lbl.setAttribute('fill', '#bba090'); lbl.textContent = tempToLabel(t);
+    svg.appendChild(lbl);
+  }
+
+  // Current 2h-slot highlight
+  const curSlot = Math.floor(new Date().getHours() / 2);
+  const slotW   = SPW / (SCHED_SLOTS - 1);
+  const hlRect  = document.createElementNS(ns, 'rect');
+  hlRect.setAttribute('x', spX(curSlot) - slotW / 2); hlRect.setAttribute('y', SPT);
+  hlRect.setAttribute('width', slotW); hlRect.setAttribute('height', SPH);
+  hlRect.setAttribute('fill', 'rgba(139,69,19,0.07)'); hlRect.setAttribute('rx', '3');
+  svg.appendChild(hlRect);
+
+  const pts = schedTemps.map((t, i) => ({ x: spX(i), y: spY(t) }));
+
+  // Fill under curve
+  const fill = document.createElementNS(ns, 'path');
+  fill.setAttribute('id', 'sched-fill');
+  fill.setAttribute('d', smoothPath(pts) + ' L ' + pts[pts.length-1].x + ' ' + SPB + ' L ' + pts[0].x + ' ' + SPB + ' Z');
+  fill.setAttribute('fill', 'url(#sched-grad)'); fill.setAttribute('stroke', 'none');
+  svg.appendChild(fill);
+
+  // Curve
+  const curve = document.createElementNS(ns, 'path');
+  curve.setAttribute('id', 'sched-curve');
+  curve.setAttribute('d', smoothPath(pts));
+  curve.setAttribute('fill', 'none'); curve.setAttribute('stroke', '#8B4513');
+  curve.setAttribute('stroke-width', '2'); curve.setAttribute('stroke-linejoin', 'round');
+  svg.appendChild(curve);
+
+  // X-axis labels
+  for (let i = 0; i < SCHED_SLOTS; i++) {
+    const lbl = document.createElementNS(ns, 'text');
+    lbl.setAttribute('x', spX(i)); lbl.setAttribute('y', SPB + 15);
+    lbl.setAttribute('text-anchor', 'middle'); lbl.setAttribute('font-size', '8.5');
+    lbl.setAttribute('fill', i === curSlot ? '#8B4513' : '#bba090');
+    lbl.setAttribute('font-weight', i === curSlot ? '700' : 'normal');
+    lbl.textContent = (i * 2) + 'h';
+    svg.appendChild(lbl);
+  }
+
+  // Draggable point groups
+  pts.forEach(function(p, i) {
+    const g = document.createElementNS(ns, 'g');
+    g.setAttribute('class', 'sched-pt'); g.setAttribute('data-idx', i);
+
+    const hit = document.createElementNS(ns, 'circle');
+    hit.setAttribute('cx', p.x); hit.setAttribute('cy', p.y);
+    hit.setAttribute('r', '14'); hit.setAttribute('fill', 'transparent');
+    g.appendChild(hit);
+
+    const dot = document.createElementNS(ns, 'circle');
+    dot.setAttribute('class', 'sched-dot-' + i);
+    dot.setAttribute('cx', p.x); dot.setAttribute('cy', p.y);
+    dot.setAttribute('r', '5'); dot.setAttribute('fill', '#8B4513');
+    dot.setAttribute('stroke', '#fff'); dot.setAttribute('stroke-width', '2');
+    g.appendChild(dot);
+
+    const tlbl = document.createElementNS(ns, 'text');
+    tlbl.setAttribute('class', 'sched-lbl-' + i);
+    tlbl.setAttribute('x', p.x);
+    tlbl.setAttribute('y', p.y < 22 ? p.y + 18 : p.y - 9);
+    tlbl.setAttribute('text-anchor', 'middle'); tlbl.setAttribute('font-size', '9');
+    tlbl.setAttribute('font-weight', '700'); tlbl.setAttribute('fill', '#8B4513');
+    tlbl.textContent = tempToLabel(schedTemps[i]);
+    g.appendChild(tlbl);
+
+    svg.appendChild(g);
+  });
+
+  svg.onmousedown  = schedOnDown;
+  svg.ontouchstart = schedOnDown;
+}
+
+function updateScheduleSVG() {
+  const svg = document.getElementById('schedule-svg');
+  if (!svg) return;
+  const pts = schedTemps.map(function(t, i) { return { x: spX(i), y: spY(t) }; });
+
+  const curve = svg.querySelector('#sched-curve');
+  if (curve) curve.setAttribute('d', smoothPath(pts));
+
+  const fill = svg.querySelector('#sched-fill');
+  if (fill) fill.setAttribute('d', smoothPath(pts) + ' L ' + pts[pts.length-1].x + ' ' + SPB + ' L ' + pts[0].x + ' ' + SPB + ' Z');
+
+  pts.forEach(function(p, i) {
+    const g = svg.querySelector('.sched-pt[data-idx="' + i + '"]');
+    if (!g) return;
+    g.querySelectorAll('circle').forEach(function(c) { c.setAttribute('cy', p.y); });
+    const lbl = g.querySelector('.sched-lbl-' + i);
+    if (lbl) {
+      lbl.setAttribute('y', p.y < 22 ? p.y + 18 : p.y - 9);
+      lbl.textContent = tempToLabel(schedTemps[i]);
+    }
+  });
+}
+
+function svgClientToPoint(svg, clientX, clientY) {
+  const pt = svg.createSVGPoint();
+  pt.x = clientX; pt.y = clientY;
+  return pt.matrixTransform(svg.getScreenCTM().inverse());
+}
+
+function schedOnDown(e) {
+  const g = e.target.closest('.sched-pt');
+  if (!g) return;
+  e.preventDefault();
+  const svg = document.getElementById('schedule-svg');
+  schedDrag = { idx: parseInt(g.getAttribute('data-idx')), svg: svg };
+  window.addEventListener('mousemove', schedOnMove);
+  window.addEventListener('mouseup',   schedOnUp);
+  window.addEventListener('touchmove', schedOnMove, { passive: false });
+  window.addEventListener('touchend',  schedOnUp);
+}
+
+function schedOnMove(e) {
+  if (!schedDrag) return;
+  e.preventDefault();
+  const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+  const sp      = svgClientToPoint(schedDrag.svg, 0, clientY);
+  const newTemp = spYtoT(sp.y);
+  if (schedTemps[schedDrag.idx] === newTemp) return;
+  schedTemps[schedDrag.idx] = newTemp;
+  updateScheduleSVG();
+  updateSchedStatus();
+}
+
+function schedOnUp() {
+  schedDrag = null;
+  window.removeEventListener('mousemove', schedOnMove);
+  window.removeEventListener('mouseup',   schedOnUp);
+  window.removeEventListener('touchmove', schedOnMove);
+  window.removeEventListener('touchend',  schedOnUp);
+}
+
+function saveSchedule() {
+  localStorage.setItem(LS_SCHED, JSON.stringify(schedTemps));
+  updateSchedStatus();
+  if (!client || !client.connected) { showToast('Saved locally (not connected)'); return; }
+  client.publish(prefix + '/schedule', JSON.stringify(schedTemps), { qos: 1, retain: true });
+  applyScheduleSlot();
+  showToast(schedEnabled ? 'Schedule saved & applied' : 'Schedule saved (enable to activate)');
+}
+
+// ── Push Notifications ───────────────────────────────────────────────────────
+const RELAY_URL    = 'https://woodmood-relay.fly.dev';
+const RELAY_SECRET = 'woodmood-jjqf9d-2026';
+const RELAY_HEADERS = {
+  'Content-Type': 'application/json',
+  'Authorization': `Bearer ${RELAY_SECRET}`
+};
+const LS_PUSH = 'woodmood_push_enabled';
+let _pushSub = null;
+const _pushThrottle = {};
+
+function triggerPush(tag, title, body) {
+  // In-app notification when tab is open (fallback if push not set up)
+  if (Notification.permission === 'granted') {
+    const now = Date.now();
+    if (_pushThrottle[tag] && now - _pushThrottle[tag] < 60_000) return;
+    _pushThrottle[tag] = now;
+    const n = new Notification(title, { body, icon: 'icon-192.png', tag, renotify: true });
+    n.onclick = () => { window.focus(); n.close(); };
+  }
+}
+
+async function enablePushNotifications() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    updatePushStatus('unsupported'); return;
+  }
+  const permission = await Notification.requestPermission();
+  if (permission !== 'granted') { updatePushStatus('blocked'); return; }
+
+  try {
+    const { key } = await fetch(`${RELAY_URL}/vapid-public-key`, { headers: RELAY_HEADERS }).then(r => r.json());
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(key)
+    });
+    const serial = document.getElementById('cfg-serial')?.value || 'JJQF9D';
+    await fetch(`${RELAY_URL}/subscribe`, {
+      method: 'POST', headers: RELAY_HEADERS,
+      body: JSON.stringify({ subscription: sub, serial })
+    });
+    _pushSub = sub;
+    localStorage.setItem(LS_PUSH, '1');
+    updatePushStatus('enabled');
+  } catch(e) {
+    console.error('Push subscribe failed:', e);
+    updatePushStatus('error');
+  }
+}
+
+async function disablePushNotifications() {
+  if (_pushSub) {
+    await fetch(`${RELAY_URL}/subscribe`, {
+      method: 'DELETE', headers: RELAY_HEADERS,
+      body: JSON.stringify({ endpoint: _pushSub.endpoint })
+    }).catch(() => {});
+    await _pushSub.unsubscribe().catch(() => {});
+    _pushSub = null;
+  }
+  localStorage.removeItem(LS_PUSH);
+  updatePushStatus('disabled');
+}
+
+function updatePushStatus(state) {
+  const el  = document.getElementById('push-notif-status');
+  const btn  = document.getElementById('push-enable-btn');
+  const btnD = document.getElementById('push-disable-btn');
+  if (!el) return;
+  const map = {
+    enabled:     '✅ Push notifications active',
+    disabled:    '',
+    blocked:     '❌ Blocked — enable in browser/phone settings',
+    unsupported: '⚠️ Not supported on this browser',
+    error:       '⚠️ Setup failed — try again'
+  };
+  el.textContent = map[state] ?? '';
+  const on = state === 'enabled';
+  if (btn)  btn.style.display  = on ? 'none'  : 'block';
+  if (btnD) btnD.style.display = on ? 'block' : 'none';
+}
+
+function urlBase64ToUint8Array(base64) {
+  const pad = '='.repeat((4 - base64.length % 4) % 4);
+  const b64 = (base64 + pad).replace(/-/g, '+').replace(/_/g, '/');
+  return Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+}
+
+// Register service worker and restore push state on load
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('service-worker.js').then(async reg => {
+    const existing = await reg.pushManager.getSubscription();
+    if (existing && localStorage.getItem(LS_PUSH)) {
+      _pushSub = existing;
+      updatePushStatus('enabled');
+    }
+  });
+}
+</script>
+</body>
+</html>
